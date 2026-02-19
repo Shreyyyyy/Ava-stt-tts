@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>AVA – Voice Agent</title>
+  <meta name="description" content="AVA – Deepgram-powered real-time AI voice agent" />
+  <meta name="theme-color" content="#040812" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- ── Header ── -->
+    <header class="hdr">
+      <div class="brand">
+        <span class="brand-name">AVA</span>
+        <span class="brand-tag">Voice Agent</span>
+      </div>
+      <div class="hdr-right">
+        <span class="status-pill" id="status-pill">
+          <span class="sdot" id="sdot"></span>
+          <span id="status-txt">Offline</span>
+        </span>
+        <button class="icon-btn" id="btn-log" title="Toggle transcript" aria-label="Toggle transcript">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ── Stage ── -->
+    <main class="stage">
+
+      <!-- Orb -->
+      <div class="orb-wrap" id="orb-wrap" data-state="idle">
+        <div class="ring r3"></div>
+        <div class="ring r2"></div>
+        <div class="ring r1"></div>
+        <div class="orb" id="orb">
+          <div class="orb-glow"></div>
+          <div class="orb-surface"></div>
+        </div>
+      </div>
+
+      <!-- Labels -->
+      <div class="labels">
+        <div class="lbl-main" id="lbl-main">Ready to call</div>
+        <div class="lbl-sub" id="lbl-sub">Tap the button below to start</div>
+      </div>
+
+      <!-- Transcript (shown when toggled) -->
+      <div class="log hidden" id="log" role="log" aria-live="polite">
+        <div class="log-scroll" id="log-scroll">
+          <p class="log-empty">Conversation will appear here…</p>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ── Controls ── -->
+    <footer class="controls">
+      <button class="call-btn idle" id="call-btn" aria-label="Start call">
+        <!-- phone icon -->
+        <svg class="ic-call" viewBox="0 0 24 24" fill="currentColor">
+          <path
+            d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+        </svg>
+        <!-- hangup icon -->
+        <svg class="ic-end" viewBox="0 0 24 24" fill="currentColor">
+          <path
+            d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.69.28-.27 0-.52-.11-.7-.29L.29 13.08C.11 12.9 0 12.65 0 12.38c0-.27.11-.52.29-.7C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.68c.18.18.29.43.29.7 0 .27-.11.52-.29.7l-2.48 2.48c-.18.18-.43.29-.7.29-.26 0-.51-.1-.69-.28-.79-.73-1.68-1.36-2.66-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+        </svg>
+      </button>
+      <div class="call-hint" id="call-hint">Start conversation</div>
+    </footer>
+
+  </div>
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
+  <script src="app.js"></script>
+</body>
+
+</html>

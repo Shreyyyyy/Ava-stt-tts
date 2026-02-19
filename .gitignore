@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# AVA data
+memory/ava_memory.db
+memory/vectors/
+memory/personality_profile.json
+training/datasets/
+logs/
+adapters/
+
+# Models
+models/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
