@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>AVA – Voice Agent</title>
-  <meta name="description" content="AVA – Deepgram-powered real-time AI voice agent" />
+  <title>AVA – Sarvam AI Voice Interface</title>
+  <meta name="description" content="AVA – AI voice agent with Sarvam AI for Indian languages" />
   <meta name="theme-color" content="#040812" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -22,7 +22,7 @@
     <header class="hdr">
       <div class="brand">
         <span class="brand-name">AVA</span>
-        <span class="brand-tag">Voice Agent</span>
+        <span class="brand-tag">Sarvam AI Voice</span>
       </div>
       <div class="hdr-right">
         <span class="status-pill" id="status-pill">
@@ -53,8 +53,93 @@
 
       <!-- Labels -->
       <div class="labels">
-        <div class="lbl-main" id="lbl-main">Ready to call</div>
-        <div class="lbl-sub" id="lbl-sub">Tap the button below to start</div>
+        <div class="lbl-main" id="lbl-main">Ready</div>
+        <div class="lbl-sub" id="lbl-sub">Select language and enter text</div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="tab-nav">
+        <button class="tab-btn active" data-tab="tts">Text to Speech</button>
+        <button class="tab-btn" data-tab="stt">Speech to Text</button>
+        <button class="tab-btn" data-tab="chat">Voice Assistant</button>
+      </div>
+
+      <!-- Tab Content -->
+      <div class="tab-content-container">
+        <!-- TTS Tab -->
+        <div class="tab-content active" id="tts-tab">
+          <div class="input-group">
+            <label for="tts-text">Text to convert:</label>
+            <textarea id="tts-text" placeholder="Enter text in Hindi or any supported Indian language..." rows="3">नमस्ते! यह एक परीक्षण है।</textarea>
+          </div>
+          
+          <div class="controls-row">
+            <div class="input-group">
+              <label for="tts-language">Language:</label>
+              <select id="tts-language">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+            
+            <div class="input-group">
+              <label for="tts-speaker">Voice:</label>
+              <select id="tts-speaker">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- STT Tab -->
+        <div class="tab-content" id="stt-tab">
+          <div class="input-group">
+            <label for="stt-language">Transcription Language:</label>
+            <select id="stt-language">
+              <option value="">Loading...</option>
+            </select>
+          </div>
+          
+          <div class="recording-info">
+            <p>Click the button below to start recording. Speak clearly and click again to stop.</p>
+            <p><small>Note: This demo simulates transcription. Full implementation requires file upload.</small></p>
+          </div>
+        </div>
+
+        <!-- Voice Assistant Tab -->
+        <div class="tab-content" id="chat-tab">
+          <div class="call-controls">
+            <div class="call-status" id="call-status">
+              <span class="status-icon">📞</span>
+              <span class="status-text">Ready to start call</span>
+            </div>
+            
+            <div class="call-buttons">
+              <button id="start-call-btn" class="call-btn start-call">
+                <span class="btn-icon">🎤</span>
+                <span class="btn-text">Start Call</span>
+              </button>
+              <button id="end-call-btn" class="call-btn end-call" style="display: none;">
+                <span class="btn-icon">📞</span>
+                <span class="btn-text">End Call</span>
+              </button>
+            </div>
+          </div>
+          
+          <div class="conversation-info">
+            <p><strong>📞 Voice Call Mode</strong></p>
+            <p>• Click "Start Call" to begin voice conversation</p>
+            <p>• Speak naturally, AVA will respond automatically</p>
+            <p>• Continuous conversation like a real phone call</p>
+            <p>• Supports Indian languages via Sarvam AI</p>
+          </div>
+          
+          <!-- Hidden text input for fallback -->
+          <div class="input-group" style="display: none;" id="fallback-input">
+            <label for="chat-message">Type message (if voice not working):</label>
+            <textarea id="chat-message" placeholder="Type your message here..." rows="3"></textarea>
+            <button id="send-text-btn" class="text-send-btn">Send Text</button>
+          </div>
+        </div>
       </div>
 
       <!-- Transcript (shown when toggled) -->
@@ -68,19 +153,18 @@
 
     <!-- ── Controls ── -->
     <footer class="controls">
-      <button class="call-btn idle" id="call-btn" aria-label="Start call">
-        <!-- phone icon -->
-        <svg class="ic-call" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+      <button class="call-btn idle" id="call-btn" aria-label="Start">
+        <!-- mic icon -->
+        <svg class="ic-mic" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
         </svg>
-        <!-- hangup icon -->
-        <svg class="ic-end" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.69.28-.27 0-.52-.11-.7-.29L.29 13.08C.11 12.9 0 12.65 0 12.38c0-.27.11-.52.29-.7C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.68c.18.18.29.43.29.7 0 .27-.11.52-.29.7l-2.48 2.48c-.18.18-.43.29-.7.29-.26 0-.51-.1-.69-.28-.79-.73-1.68-1.36-2.66-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+        <!-- stop icon -->
+        <svg class="ic-stop" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="6" width="12" height="12"/>
         </svg>
       </button>
-      <div class="call-hint" id="call-hint">Start conversation</div>
+      <div class="call-hint" id="call-hint">Start voice session</div>
     </footer>
 
   </div>

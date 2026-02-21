@@ -1,74 +1,47 @@
 """
-FastAPI backend for AVA – Digital AI Avatar.
+FastAPI backend for AVA – Sarvam AI Voice Services.
 
 Endpoints:
-  POST /chat                 – send a message, get a response
-  POST /feedback             – submit feedback on a conversation turn
-  GET  /memory               – retrieve recent conversations
-  GET  /memory/search        – semantic search over memory
-  GET  /memory/profile       – personality profile
-  POST /training/trigger     – kick off LoRA fine-tuning
-  GET  /training/history     – list past training runs
-  GET  /health               – system health check
-  GET  /models               – list available Ollama models
-  POST /tts                  – Deepgram Aura-2 text-to-speech (returns MP3)
-  GET  /stt/token            – return Deepgram API key for browser WS auth
-  WS   /stt/proxy            – WebSocket: browser PCM → Deepgram → transcripts
+  POST /sarvam/tts           – Sarvam AI text-to-speech (Indian languages)
+  GET  /sarvam/tts/languages – Get supported TTS languages
+  GET  /sarvam/tts/speakers  – Get available TTS speakers
+  POST /sarvam/stt           – Sarvam AI speech-to-text (Indian languages)
+  GET  /sarvam/stt/languages – Get supported STT languages
+  GET  /sarvam/stt/models    – Get available STT models
+  GET  /health               – System health check
 """
 
 import uuid
-import json
 import logging
-import asyncio
-from datetime import datetime
+import os
+import tempfile
+import time
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
-import websockets
+import aiofiles
 
-from memory.database import (
-    init_db,
-    save_conversation,
-    update_feedback,
-    get_recent_conversations,
-    get_style_profile,
-    get_training_history,
-)
-from memory.vector_store import get_vector_store
-from memory.style_analyzer import update_profile_from_message, get_personality_profile
-from backend.llm_client import chat, is_ollama_running, list_local_models
-from backend.deepgram_client import (
-    tts_speak,
-    DEEPGRAM_API_KEY,
-    DEEPGRAM_WS_URL,
-    DEEPGRAM_STT_DEFAULTS,
-    DEEPGRAM_AGENT_URL,
-    AGENT_SETTINGS,
-)
+from backend.sarvam_tts_client import SarvamTTSClient
+from backend.sarvam_stt_client import SarvamSTTClient
+from backend.ollama_client import OllamaClient
+import logger_config
 
-# ── optional training import (graceful if heavy deps missing) ────────────────
-try:
-    from training.train_adapter import run_training_pipeline
-    TRAINING_AVAILABLE = True
-except ImportError:
-    TRAINING_AVAILABLE = False
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s – %(message)s",
+# Setup logging
+logger = logger_config.setup_logging(
+    log_level=logging.INFO,
+    log_file="logs/backend.log"
 )
-logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # App bootstrap
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="AVA – Digital AI Avatar",
-    description="Self-improving conversational AI that learns your communication style.",
+    title="AVA – Sarvam AI Voice Services",
+    description="Indian language text-to-speech and speech-to-text using Sarvam AI.",
     version="1.0.0",
 )
 
@@ -83,58 +56,77 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    init_db()
-    logger.info("AVA backend started ✓")
+    logger.info("=== AVA Sarvam Backend Starting ===")
+    
+    # Initialize Sarvam AI clients
+    try:
+        logger.info("Initializing Sarvam AI clients...")
+        app.state.sarvam_tts = SarvamTTSClient()
+        app.state.sarvam_stt = SarvamSTTClient()
+        logger.info("✓ Sarvam AI clients initialized successfully")
+    except Exception as e:
+        logger.error(f"✗ Failed to initialize Sarvam AI clients: {e}")
+        app.state.sarvam_tts = None
+        app.state.sarvam_stt = None
+    
+    # Initialize Ollama client
+    try:
+        logger.info("Initializing Ollama client...")
+        app.state.ollama = OllamaClient()
+        if app.state.ollama.is_available():
+            logger.info("✓ Ollama client initialized successfully")
+        else:
+            logger.warning("⚠ Ollama not available. Voice assistant responses will be limited.")
+            app.state.ollama = None
+    except Exception as e:
+        logger.warning(f"⚠ Failed to initialize Ollama client: {e}")
+        app.state.ollama = None
+    
+    logger.info("✓ AVA Sarvam backend started successfully")
+    logger.info("Available endpoints:")
+    logger.info("  - POST /sarvam/tts")
+    logger.info("  - GET  /sarvam/tts/languages")
+    logger.info("  - GET  /sarvam/tts/speakers")
+    logger.info("  - POST /sarvam/stt")
+    logger.info("  - GET  /sarvam/stt/languages")
+    logger.info("  - GET  /sarvam/stt/models")
+    logger.info("  - POST /sarvam/stt/upload")
+    logger.info("  - POST /ava/chat")
+    logger.info("  - GET  /health")
+    logger.info("=== Backend Startup Complete ===")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pydantic schemas
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ChatRequest(BaseModel):
-    message:    str          = Field(..., min_length=1, max_length=4096)
-    session_id: str          = Field(default_factory=lambda: str(uuid.uuid4()))
-    model:      str          = Field(default="llama3.2")
-    history:    List[dict]   = Field(default=[])
-    temperature: float       = Field(default=0.7, ge=0.0, le=2.0)
-    use_memory:  bool        = Field(default=True)
-    use_style:   bool        = Field(default=True)
+class SarvamTTSRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4096)
+    target_language_code: str = Field(default="hi-IN")
+    speaker: str = Field(default="shreya")
+    model: str = Field(default="bulbul:v3")
+    pace: float = Field(default=1.1, ge=0.5, le=2.0)
+    speech_sample_rate: int = Field(default=22050)
+    output_audio_codec: str = Field(default="mp3")
+    enable_preprocessing: bool = Field(default=True)
 
 
-class ChatResponse(BaseModel):
-    conversation_id: int
-    session_id:      str
-    response:        str
-    style_metrics:   dict
-    memory_hits:     int
-    timestamp:       str
+class SarvamSTTRequest(BaseModel):
+    audio_paths: List[str] = Field(..., min_items=1)
+    model: str = Field(default="saaras:v3")
+    mode: str = Field(default="async")
+    language_code: str = Field(default="hi-IN")
+    with_diarization: bool = Field(default=False)
+    num_speakers: Optional[int] = Field(None)
+    output_dir: str = Field(default="./output")
 
 
-class FeedbackRequest(BaseModel):
-    conversation_id: int
-    feedback_label:  str   # "sounds_like_me" | "too_verbose" | "too_soft"
-                           # | "wrong_reasoning" | "rewrite"
-    user_correction: Optional[str] = None
-
-
-class FeedbackResponse(BaseModel):
-    status:  str
-    message: str
-
-FEEDBACK_SCORES = {
-    "sounds_like_me":  1.0,
-    "too_verbose":     0.3,
-    "too_soft":        0.4,
-    "wrong_reasoning": 0.1,
-    "rewrite":         0.2,
-}
-
-
-class TrainingRequest(BaseModel):
-    model:       str   = Field(default="llama3.2")
-    min_score:   float = Field(default=0.7, ge=0.0, le=1.0)
-    max_examples: int  = Field(default=500, ge=10, le=5000)
-    notes:       str   = Field(default="")
+class AVAChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1000)
+    language_code: str = Field(default="hi-IN")
+    speaker: str = Field(default="shreya")
+    model: str = Field(default="bulbul:v3")
+    pace: float = Field(default=1.0, ge=0.5, le=2.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,324 +135,411 @@ class TrainingRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {
-        "status":             "ok",
-        "ollama_running":     is_ollama_running(),
-        "training_enabled":   TRAINING_AVAILABLE,
-        "deepgram_key_set":   bool(DEEPGRAM_API_KEY),
-        "timestamp":          datetime.utcnow().isoformat(),
+    logger.info("Health check requested")
+    health_status = {
+        "status": "ok",
+        "sarvam_tts_available": app.state.sarvam_tts is not None,
+        "sarvam_stt_available": app.state.sarvam_stt is not None,
+        "ollama_available": app.state.ollama is not None,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
     }
+    logger.info(f"Health status: {health_status}")
+    return health_status
 
 
-@app.get("/models")
-async def models():
-    return {"models": list_local_models()}
+# ── Sarvam AI Text-to-Speech ─────────────────────────────────────────────────────
 
-
-# ── Deepgram TTS ──────────────────────────────────────────────────────────────
-
-class TTSRequest(BaseModel):
-    text:  str = Field(..., min_length=1, max_length=4096)
-    model: str = Field(default="aura-2-thalia-en")
-
-
-@app.post("/tts")
-async def tts_endpoint(req: TTSRequest):
-    """
-    Convert text to speech via Deepgram Aura-2.
-    Returns raw MP3 audio so the browser can play it with the Audio() API.
-    """
-    try:
-        audio_bytes = tts_speak(text=req.text, model=req.model)
-        return Response(
-            content=audio_bytes,
-            media_type="audio/mpeg",
-            headers={"Cache-Control": "no-cache"},
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-# ── Deepgram STT – safe key delivery ─────────────────────────────────────────
-
-@app.get("/stt/token")
-async def stt_token():
-    """
-    Return the Deepgram API key + WS connection params for the browser.
-    The key never appears in frontend source code — fetched at runtime.
-    """
-    return {
-        "api_key": DEEPGRAM_API_KEY,
-        "ws_url":  DEEPGRAM_WS_URL,
-        "params":  DEEPGRAM_STT_DEFAULTS,
-    }
-
-
-# ── Deepgram STT – WebSocket proxy ───────────────────────────────────────────
-
-@app.websocket("/stt/proxy")
-async def stt_proxy(ws: WebSocket):
-    """
-    Bidirectional proxy: browser <──PCM──> this server <──PCM──> Deepgram
-
-    Browser sends raw PCM audio chunks as binary frames.
-    This server forwards them to Deepgram and sends Deepgram's JSON
-    transcript events back to the browser.
-    """
-    await ws.accept()
-
-    # Build Deepgram WS URL with query params
-    params = "&".join(f"{k}={v}" for k, v in DEEPGRAM_STT_DEFAULTS.items())
-    dg_url = f"{DEEPGRAM_WS_URL}?{params}"
-    dg_headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-
-    try:
-        async with websockets.connect(dg_url, additional_headers=dg_headers) as dg_ws:
-
-            async def forward_to_deepgram():
-                """Browser → Deepgram: raw PCM audio chunks."""
-                try:
-                    while True:
-                        data = await ws.receive_bytes()
-                        await dg_ws.send(data)
-                except (WebSocketDisconnect, Exception):
-                    await dg_ws.close()
-
-            async def forward_to_browser():
-                """Deepgram → Browser: JSON transcript events."""
-                try:
-                    async for message in dg_ws:
-                        await ws.send_text(message)
-                except Exception:
-                    pass
-
-            await asyncio.gather(
-                forward_to_deepgram(),
-                forward_to_browser(),
-            )
-
-    except WebSocketDisconnect:
-        logger.info("STT proxy: browser disconnected")
-    except Exception as e:
-        logger.error(f"STT proxy error: {e}")
-        try:
-            await ws.close(code=1011, reason=str(e))
-        except Exception:
-            pass
-
-
-# ── Chat ─────────────────────────────────────────────────────────────────────
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(req: ChatRequest):
-    # 1. Style profile
-    style_profile = get_personality_profile() if req.use_style else None
-
-    # 2. Semantic memory retrieval
-    vector_store = get_vector_store()
-    memory_hits  = 0
-    memory_context = ""
-    if req.use_memory and vector_store.count() > 0:
-        results = vector_store.search(req.message, k=3)
-        if results:
-            snippets = [m.get("text_snippet", "") for _, m in results if _ < 1.5]
-            if snippets:
-                memory_context = (
-                    "\n\n[Memory context – past conversations you may reference]\n"
-                    + "\n---\n".join(snippets)
-                )
-                memory_hits = len(snippets)
-
-    # 3. Build message list
-    messages = list(req.history)
-    if memory_context:
-        # Append memory as a system note at the end of history
-        messages.append({"role": "system", "content": memory_context})
-    messages.append({"role": "user", "content": req.message})
-
-    # 4. LLM call
-    try:
-        reply = chat(
-            messages=messages,
-            model=req.model,
-            style_profile=style_profile,
-            temperature=req.temperature,
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-    # 5. Persist conversation
-    style_metrics = update_profile_from_message(req.message)
-    conv_id = save_conversation(
-        session_id=req.session_id,
-        user_message=req.message,
-        model_response=reply,
-        style_tags=list(style_metrics.keys()),
-    )
-
-    # 6. Add to vector store
-    vector_store.add(
-        conversation_id=conv_id,
-        text=f"User: {req.message}\nAva: {reply}",
-    )
-
-    return ChatResponse(
-        conversation_id=conv_id,
-        session_id=req.session_id,
-        response=reply,
-        style_metrics=style_metrics,
-        memory_hits=memory_hits,
-        timestamp=datetime.utcnow().isoformat(),
-    )
-
-
-# ── Feedback ─────────────────────────────────────────────────────────────────
-
-@app.post("/feedback", response_model=FeedbackResponse)
-async def feedback_endpoint(req: FeedbackRequest):
-    score = FEEDBACK_SCORES.get(req.feedback_label, 0.5)
-    update_feedback(
-        conversation_id=req.conversation_id,
-        feedback_label=req.feedback_label,
-        feedback_score=score,
-        user_correction=req.user_correction,
-    )
-    return FeedbackResponse(
-        status="ok",
-        message=f"Feedback '{req.feedback_label}' recorded (score={score}).",
-    )
-
-
-# ── Memory ───────────────────────────────────────────────────────────────────
-
-@app.get("/memory")
-async def memory_endpoint(limit: int = 20, session_id: Optional[str] = None):
-    convs = get_recent_conversations(limit=limit, session_id=session_id)
-    return {"conversations": convs, "count": len(convs)}
-
-
-@app.get("/memory/search")
-async def memory_search(q: str, k: int = 5):
-    vector_store = get_vector_store()
-    results = vector_store.search(q, k=k)
-    return {
-        "query":   q,
-        "results": [{"distance": d, "metadata": m} for d, m in results],
-    }
-
-
-@app.get("/memory/profile")
-async def memory_profile():
-    return get_personality_profile()
-
-
-# ── Training ─────────────────────────────────────────────────────────────────
-
-@app.post("/training/trigger")
-async def training_trigger(req: TrainingRequest, bg: BackgroundTasks):
-    if not TRAINING_AVAILABLE:
+@app.post("/sarvam/tts")
+async def sarvam_tts(req: SarvamTTSRequest):
+    """Convert text to speech using Sarvam AI"""
+    logger.info(f"TTS request received: text='{req.text[:50]}...', language='{req.target_language_code}', speaker='{req.speaker}'")
+    
+    if not app.state.sarvam_tts:
+        logger.error("TTS client not initialized")
         raise HTTPException(
-            status_code=501,
-            detail="Training dependencies not installed. Run: pip install -r requirements-training.txt",
+            status_code=503,
+            detail="Sarvam TTS client not initialized. Check SARVAM_API_KEY environment variable."
         )
-    bg.add_task(
-        run_training_pipeline,
-        base_model=req.model,
-        min_score=req.min_score,
-        max_examples=req.max_examples,
-        notes=req.notes,
-    )
-    return {"status": "queued", "message": "Fine-tuning started in the background."}
-
-
-@app.get("/training/history")
-async def training_history():
-    return {"runs": get_training_history()}
-
-
-# ── Deepgram Voice Agent proxy ────────────────────────────────────────────────────
-
-@app.websocket("/agent/proxy")
-async def agent_proxy(ws: WebSocket):
-    """
-    Bidirectional proxy between the browser and Deepgram Voice Agent API.
-
-    Protocol:
-      1. Backend connects to Deepgram with the API key in headers.
-      2. Backend sends the Settings JSON as the very first message.
-      3. Browser sends raw Int16 PCM @ 48 kHz as binary frames.
-      4. Deepgram sends back:
-           - Binary frames  → raw Int16 PCM @24 kHz (agent speech)
-           - Text frames    → JSON events (SettingsApplied, UserStartedSpeaking, …)
-    """
-    await ws.accept()
-    logger.info("Voice Agent proxy: browser connected")
-
+    
     try:
-        async with websockets.connect(
-            DEEPGRAM_AGENT_URL,
-            additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"},
-        ) as dg_ws:
-            # ① Handshake — Settings must be the first message
-            await dg_ws.send(json.dumps(AGENT_SETTINGS))
-            logger.info("Voice Agent proxy: Settings sent to Deepgram")
-
-            async def browser_to_dg():
-                """Forward browser audio (binary) and control messages (text) to Deepgram."""
-                try:
-                    while True:
-                        data = await ws.receive()
-                        if data.get("bytes"):
-                            await dg_ws.send(data["bytes"])
-                        elif data.get("text"):
-                            await dg_ws.send(data["text"])
-                except (WebSocketDisconnect, Exception) as e:
-                    logger.info(f"Voice Agent proxy: browser disconnected ({e})")
-                    try:
-                        await dg_ws.close()
-                    except Exception:
-                        pass
-
-            async def dg_to_browser():
-                """Forward Deepgram audio + events back to the browser."""
-                try:
-                    async for msg in dg_ws:
-                        if isinstance(msg, bytes):
-                            await ws.send_bytes(msg)
-                        else:
-                            # Log every text frame so we can see Deepgram events
-                            try:
-                                evt = json.loads(msg)
-                                evt_type = evt.get("type", "unknown")
-                                if evt_type == "Error":
-                                    logger.error(
-                                        f"Deepgram Error event: {json.dumps(evt)}"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"Deepgram → browser [{evt_type}]: {msg[:200]}"
-                                    )
-                            except Exception:
-                                logger.info(f"Deepgram → browser (raw): {msg[:200]}")
-                            await ws.send_text(msg)
-                except websockets.exceptions.ConnectionClosedError as e:
-                    logger.error(
-                        f"Voice Agent proxy: Deepgram closed with code={e.code} reason={e.reason!r}"
-                    )
-                except websockets.exceptions.ConnectionClosedOK as e:
-                    logger.info(
-                        f"Voice Agent proxy: Deepgram closed cleanly code={e.code} reason={e.reason!r}"
-                    )
-                except Exception as e:
-                    logger.error(f"Voice Agent proxy: Deepgram recv error: {e}")
-
-            await asyncio.gather(browser_to_dg(), dg_to_browser())
-
-    except WebSocketDisconnect:
-        logger.info("Voice Agent proxy: browser disconnected before Deepgram connect")
+        # Generate unique filename
+        temp_dir = tempfile.gettempdir()
+        output_file = os.path.join(temp_dir, f"tts_{uuid.uuid4().hex[:8]}.mp3")
+        logger.info(f"Generating TTS audio: {output_file}")
+        
+        # Generate speech
+        start_time = time.time()
+        result_file = app.state.sarvam_tts.stream_tts(
+            text=req.text,
+            target_language_code=req.target_language_code,
+            speaker=req.speaker,
+            model=req.model,
+            pace=req.pace,
+            speech_sample_rate=req.speech_sample_rate,
+            output_audio_codec=req.output_audio_codec,
+            enable_preprocessing=req.enable_preprocessing,
+            output_file=output_file
+        )
+        generation_time = time.time() - start_time
+        
+        # Check file size
+        file_size = os.path.getsize(result_file) if os.path.exists(result_file) else 0
+        logger.info(f"TTS generated successfully: {file_size} bytes in {generation_time:.2f}s")
+        
+        # Return audio file
+        def iterfile():
+            with open(result_file, mode="rb") as file_like:
+                while True:
+                    chunk = file_like.read(8192)
+                    if not chunk:
+                        break
+                    yield chunk
+        
+        # Schedule cleanup after streaming
+        import asyncio
+        async def cleanup():
+            await asyncio.sleep(1)  # Give time for streaming to complete
+            try:
+                os.remove(result_file)
+                logger.info(f"Cleaned up temporary file: {output_file}")
+            except:
+                pass
+        
+        asyncio.create_task(cleanup())
+        
+        logger.info("Streaming TTS audio response")
+        return StreamingResponse(
+            iterfile(),
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": f"attachment; filename=tts_output.mp3",
+                "X-Audio-Codec": req.output_audio_codec,
+                "X-Language": req.target_language_code,
+                "X-Speaker": req.speaker,
+                "X-Generation-Time": f"{generation_time:.2f}s"
+            }
+        )
+        
     except Exception as e:
-        logger.error(f"Voice Agent proxy error: {e}")
+        logger.error(f"TTS generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sarvam/tts/languages")
+async def sarvam_tts_languages():
+    """Get supported languages for TTS"""
+    if not app.state.sarvam_tts:
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam TTS client not initialized"
+        )
+    
+    return {"languages": app.state.sarvam_tts.get_supported_languages()}
+
+
+@app.get("/sarvam/tts/speakers")
+async def sarvam_tts_speakers():
+    """Get available speakers for TTS"""
+    if not app.state.sarvam_tts:
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam TTS client not initialized"
+        )
+    
+    return {"speakers": app.state.sarvam_tts.get_available_speakers()}
+
+
+# ── Sarvam AI Speech-to-Text ─────────────────────────────────────────────────────
+
+@app.post("/sarvam/stt")
+async def sarvam_stt(req: SarvamSTTRequest, bg: BackgroundTasks):
+    """Transcribe audio files using Sarvam AI"""
+    if not app.state.sarvam_stt:
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam STT client not initialized. Check SARVAM_API_KEY environment variable."
+        )
+    
+    try:
+        # Validate audio files exist
+        for audio_path in req.audio_paths:
+            if not os.path.exists(audio_path):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Audio file not found: {audio_path}"
+                )
+        
+        # Start transcription in background
+        def run_transcription():
+            return app.state.sarvam_stt.transcribe_files(
+                audio_paths=req.audio_paths,
+                model=req.model,
+                mode=req.mode,
+                language_code=req.language_code,
+                with_diarization=req.with_diarization,
+                num_speakers=req.num_speakers,
+                output_dir=req.output_dir
+            )
+        
+        # For now, run synchronously (can be made async with proper job tracking)
+        result = run_transcription()
+        
+        return {
+            "status": "completed",
+            "job_id": result["job_id"],
+            "total_files": result["total_files"],
+            "successful": result["successful"],
+            "failed": result["failed"],
+            "output_dir": result["output_dir"],
+            "results": result["results"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Sarvam STT error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sarvam/stt/languages")
+async def sarvam_stt_languages():
+    """Get supported languages for STT"""
+    if not app.state.sarvam_stt:
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam STT client not initialized"
+        )
+    
+    return {"languages": app.state.sarvam_stt.get_supported_languages()}
+
+
+@app.get("/sarvam/stt/models")
+async def sarvam_stt_models():
+    """Get available STT models"""
+    if not app.state.sarvam_stt:
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam STT client not initialized"
+        )
+    
+    return {"models": app.state.sarvam_stt.get_available_models()}
+
+
+# ── Sarvam AI STT File Upload ─────────────────────────────────────────────────────
+
+@app.post("/sarvam/stt/upload")
+async def sarvam_stt_upload(
+    audio_file: UploadFile = File(..., description="Audio file to transcribe"),
+    language_code: str = "hi-IN",
+    model: str = "saaras:v3",
+    with_diarization: bool = True
+):
+    """Upload and transcribe audio file using Sarvam AI"""
+    logger.info(f"STT upload request: file='{audio_file.filename}', language='{language_code}', model='{model}'")
+    
+    if not app.state.sarvam_stt:
+        logger.error("STT client not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam STT client not initialized. Check SARVAM_API_KEY environment variable."
+        )
+    
+    try:
+        # Create temporary directory for uploads
+        upload_dir = tempfile.mkdtemp(prefix="ava_upload_")
+        file_path = os.path.join(upload_dir, audio_file.filename)
+        
+        # Save uploaded file
+        async with aiofiles.open(file_path, 'wb') as f:
+            content = await audio_file.read()
+            await f.write(content)
+        
+        file_size = os.path.getsize(file_path)
+        logger.info(f"Audio file saved: {file_path} ({file_size} bytes)")
+        
+        # Transcribe the file
+        start_time = time.time()
+        result = app.state.sarvam_stt.transcribe_single_file(
+            audio_path=file_path,
+            model=model,
+            language_code=language_code,
+            with_diarization=with_diarization,
+            output_dir=upload_dir
+        )
+        transcription_time = time.time() - start_time
+        
+        # Extract transcript from results
+        transcript = "Transcription completed"
+        if result.get("results", {}).get("successful"):
+            successful_files = result["results"]["successful"]
+            if successful_files and len(successful_files) > 0:
+                first_result = successful_files[0]
+                # Try to read the transcript JSON file
+                transcript_file = os.path.join(upload_dir, f"{audio_file.filename}.json")
+                if os.path.exists(transcript_file):
+                    import json
+                    with open(transcript_file, 'r') as f:
+                        transcript_data = json.load(f)
+                        transcript = transcript_data.get("transcript", "Transcription completed")
+        
+        logger.info(f"Transcription completed in {transcription_time:.2f}s: '{transcript[:100]}...'")
+        
+        # Clean up temporary files
+        import shutil
         try:
-            await ws.close(code=1011, reason=str(e))
-        except Exception:
+            shutil.rmtree(upload_dir)
+            logger.info(f"Cleaned up temporary directory: {upload_dir}")
+        except:
             pass
+        
+        return JSONResponse({
+            "status": "completed",
+            "transcript": transcript,
+            "processing_time": f"{transcription_time:.2f}s",
+            "file_size": file_size
+        })
+        
+    except Exception as e:
+        logger.error(f"STT upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── AVA Voice Assistant ─────────────────────────────────────────────────────
+
+@app.post("/ava/chat")
+async def ava_chat(req: AVAChatRequest):
+    """Complete voice assistant workflow: STT -> LLM -> TTS"""
+    logger.info(f"AVA chat request: message='{req.message[:50]}...'")
+    
+    if not app.state.sarvam_tts:
+        logger.error("TTS client not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="Sarvam TTS client not initialized"
+        )
+    
+    if not app.state.ollama:
+        logger.warning("Ollama not available, using simple response")
+        # Fallback response when Ollama is not available
+        fallback_response = "I'm AVA, your voice assistant. I can help you with text-to-speech and speech-to-text in Indian languages. Please ensure Ollama is running with llama3.2 model for full conversational capabilities."
+        
+        # Generate speech from fallback response
+        try:
+            temp_dir = tempfile.gettempdir()
+            output_file = os.path.join(temp_dir, f"ava_response_{uuid.uuid4().hex[:8]}.mp3")
+            
+            result_file = app.state.sarvam_tts.stream_tts(
+                text=fallback_response,
+                target_language_code=req.language_code,
+                speaker=req.speaker,
+                model=req.model,
+                pace=req.pace,
+                output_file=output_file
+            )
+            
+            # Return audio file
+            def iterfile():
+                with open(result_file, mode="rb") as file_like:
+                    while True:
+                        chunk = file_like.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+            
+            # Schedule cleanup
+            import asyncio
+            async def cleanup():
+                await asyncio.sleep(1)
+                try:
+                    os.remove(result_file)
+                except:
+                    pass
+            
+            asyncio.create_task(cleanup())
+            
+            logger.info("Returning fallback audio response")
+            return StreamingResponse(
+                iterfile(),
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Disposition": "attachment; filename=ava_response.mp3",
+                    "X-Audio-Codec": "mp3",
+                    "X-Language": req.language_code,
+                    "X-Speaker": req.speaker,
+                    "X-Response-Type": "fallback"
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Fallback TTS failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    try:
+        # Generate LLM response
+        logger.info("Generating LLM response...")
+        llm_response = app.state.ollama.generate_response(
+            prompt=req.message,
+            system_prompt="You are AVA, a helpful AI voice assistant specializing in Indian languages and culture.",
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        logger.info(f"LLM response: '{llm_response[:100]}...'")
+        
+        # Generate speech from LLM response
+        logger.info("Generating speech from LLM response...")
+        temp_dir = tempfile.gettempdir()
+        output_file = os.path.join(temp_dir, f"ava_response_{uuid.uuid4().hex[:8]}.mp3")
+        
+        start_time = time.time()
+        result_file = app.state.sarvam_tts.stream_tts(
+            text=llm_response,
+            target_language_code=req.language_code,
+            speaker=req.speaker,
+            model=req.model,
+            pace=req.pace,
+            output_file=output_file
+        )
+        generation_time = time.time() - start_time
+        
+        # Return audio file
+        def iterfile():
+            with open(result_file, mode="rb") as file_like:
+                while True:
+                    chunk = file_like.read(8192)
+                    if not chunk:
+                        break
+                    yield chunk
+        
+        # Schedule cleanup
+        import asyncio
+        async def cleanup():
+            await asyncio.sleep(1)
+            try:
+                os.remove(result_file)
+            except:
+                pass
+        
+        asyncio.create_task(cleanup())
+        
+        logger.info(f"AVA chat completed in {generation_time:.2f}s")
+        return StreamingResponse(
+            iterfile(),
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "attachment; filename=ava_response.mp3",
+                "X-Audio-Codec": "mp3",
+                "X-Language": req.language_code,
+                "X-Speaker": req.speaker,
+                "X-Response-Type": "llm_generated",
+                "X-Generation-Time": f"{generation_time:.2f}s",
+                "X-LLM-Model": app.state.ollama.model_name
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"AVA chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

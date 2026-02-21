@@ -1,6 +1,6 @@
 """
-Serve the AVA frontend on port 3000.
-Run this alongside main.py to access the UI locally.
+Serve the AVA Sarvam AI frontend on port 3001.
+Run this alongside the backend to access the UI locally.
 """
 import http.server
 import socketserver
@@ -8,7 +8,7 @@ from pathlib import Path
 import webbrowser
 import threading
 
-PORT = 3000
+PORT = 3001
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 
 

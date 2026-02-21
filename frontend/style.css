@@ -20,6 +20,7 @@
   --c-think: #f59e0b;
   --c-agent: #818cf8;
   --c-end: #ef4444;
+  --c-rec: #ef4444;
 
   --font: 'Inter', system-ui, sans-serif;
   --font-hd: 'Space Grotesk', system-ui, sans-serif;
@@ -77,8 +78,10 @@ body {
   font-size: 1.35rem;
   font-weight: 700;
   background: linear-gradient(135deg, #818cf8 0%, #00c4a7 100%);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  color: transparent; /* Fallback for browsers that don't support background-clip */
 }
 
 .brand-tag {
@@ -644,6 +647,267 @@ body {
   background: rgba(239, 68, 68, .18);
   border: 1px solid rgba(239, 68, 68, .35);
   color: #fca5a5;
+}
+
+.toast.warning {
+  background: rgba(245, 158, 11, .18);
+  border: 1px solid rgba(245, 158, 11, .35);
+  color: #fcd34d;
+}
+
+/* ── Voice Call Styles */
+.call-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.call-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.status-icon {
+  font-size: 2rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.call-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.call-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 2rem;
+  border: none;
+  border-radius: 2rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: white;
+}
+
+.start-call {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.start-call:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+}
+
+.end-call {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.end-call:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.3);
+}
+
+.btn-icon {
+  font-size: 1.5rem;
+}
+
+.btn-text {
+  font-family: 'Inter', sans-serif;
+}
+
+.conversation-info {
+  text-align: center;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.conversation-info p {
+  margin: 0.5rem 0;
+  color: var(--text-secondary);
+}
+
+.text-send-btn {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.text-send-btn:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+/* ── Tab Navigation ───────────────────────────────────── */
+.tab-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1.5rem 0 1rem 0;
+  justify-content: center;
+}
+
+.tab-btn {
+  padding: 0.75rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.tab-btn.active {
+  background: var(--c-agent);
+  border-color: var(--c-agent);
+  color: white;
+}
+
+/* ── Tab Content ─────────────────────────────────────── */
+.tab-content-container {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.tab-content {
+  display: none;
+  animation: fadeIn 0.3s ease;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.input-group {
+  margin-bottom: 1rem;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.input-group textarea,
+.input-group select {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.input-group textarea:focus,
+.input-group select:focus {
+  outline: none;
+  border-color: var(--c-agent);
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1);
+}
+
+.input-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.controls-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.recording-info {
+  text-align: center;
+  padding: 1.5rem;
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.recording-info p {
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.recording-info small {
+  color: var(--dim);
+  font-size: 0.8rem;
+}
+
+/* ── Recording State ───────────────────────────────────── */
+.sdot.rec {
+  background: var(--c-rec);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Icon Updates ─────────────────────────────────────── */
+.ic-mic,
+.ic-stop {
+  width: 24px;
+  height: 24px;
+  transition: all 0.2s ease;
+}
+
+.call-btn.idle .ic-stop,
+.call-btn.active .ic-mic {
+  display: none;
+}
+
+.call-btn.idle .ic-mic,
+.call-btn.active .ic-stop {
+  display: block;
 }
 
 /* ── Utilities ───────────────────────────────────────── */

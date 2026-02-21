@@ -7,19 +7,23 @@ __pycache__/
 dist/
 build/
 
-# AVA data
-memory/ava_memory.db
-memory/vectors/
-memory/personality_profile.json
-training/datasets/
-logs/
-adapters/
+# Environment
+.env
 
-# Models
-models/
+# Audio files
+*.mp3
+*.wav
+*.webm
+
+# Output directories
+output/
+logs/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 .DS_Store
+
+# OS
+Thumbs.db
